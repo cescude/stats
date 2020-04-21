@@ -21,7 +21,15 @@ sub decimal {
   printf(" %%time %f + %f\n", rand(200), rand());
 }
 
+my $tr=0;
+sub newHeader {
+  if ( rand() < 0.1 ) {
+    printf(">>> Test run #%d, starting now...\n", $tr++);
+  }
+}
+
 while (1) {
+  newHeader;
   m0;
   m1;
   m2;

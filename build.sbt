@@ -6,3 +6,4 @@ nativeLinkStubs := true
 enablePlugins(ScalaNativePlugin)
 
 libraryDependencies += "com.lihaoyi" %%% "fansi" % "0.2.7"
+libraryDependencies += "org.rogach" %%% "scallop" % "3.4.0"

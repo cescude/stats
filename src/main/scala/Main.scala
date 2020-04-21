@@ -1,5 +1,9 @@
 import java.io.{BufferedReader, InputStreamReader}
 
+import org.rogach.scallop.ScallopConf
+
+import scala.util.matching.Regex
+
 object Main {
 
   case class Key( tokens: Seq[String] )
@@ -19,33 +23,33 @@ object Main {
       }))
     }
 
-    def repr(opts: Opts): String = tokens.map(_.repr(opts)).mkString("")
+    def repr(opts: DisplayOpts): String = tokens.map(_.repr(opts)).mkString("")
   }
 
   sealed trait Token {
     def merge( t: Token ): Token   // combines "this" with the token "t"
-    def repr( opts: Opts ): String // convert this token to a printable value
+    def repr( opts: DisplayOpts ): String // convert this token to a printable value
   }
   case class WordToken( w: String ) extends Token {
     override def merge(t: Token): Token = t match {
-      case WordToken(_) => this
+      case WordToken(_) => t
       case _ => ???
     }
 
-    override def repr(opts: Opts): String = w
+    override def repr(opts: DisplayOpts): String = w
   }
 
-  def color(s: BigInt): fansi.Str = color(fansi.Str(s.toString))
+  def color(s: BigDecimal): fansi.Str = color(fansi.Str(s.toString))
   def color(s: fansi.Str): fansi.Str = fansi.Color.Blue(s)
 
-  case class NumToken(mn: BigInt, mx: BigInt, current: BigInt) extends Token {
+  case class NumToken(mn: BigDecimal, mx: BigDecimal, current: BigDecimal) extends Token {
     override def merge(t: Token): Token = t match {
       case NumToken(mn0, _, c0) if mn0 < mn => NumToken(mn0, mx, c0)
       case NumToken(_, mx0, c0) if mx0 > mx => NumToken(mn, mx0, c0)
-      case n@NumToken(_, _, c0) => NumToken(mn, mx, c0)
+      case NumToken(_, _, c0) => NumToken(mn, mx, c0)
       case _ => ???
     }
-    override def repr(opts: Opts): String = opts match {
+    override def repr(opts: DisplayOpts): String = opts match {
       case MinAndMax if mn == mx => color(mn).render
       case MinAndMax if mn == current => "[" + color(mn) + "…" + mx + "]"
       case MinAndMax if mx == current => "[" + mn + "…" + color(mx) + "]"
@@ -65,64 +69,85 @@ object Main {
 
   // Be slow? Who cares, it's fast enough
   @scala.annotation.tailrec
-  def tokenize(opts: Opts, s: String, acc: Seq[Token] ): Seq[Token] = {
+  def tokenize(s: String, acc: Seq[Token] ): Seq[Token] = {
     if ( s.isEmpty ) acc
     else {
-      val digits = "1234567890"
-      val isNum = digits.contains(s(0))
+      val numbx = raw"[0-9]+\.[0-9]+|[0-9]+".r
+      val wordx = raw"[^0-9]+".r
 
-      lazy val num = s.takeWhile(c => digits.contains(c))
-      lazy val txt = s.takeWhile( c => !digits.contains(c) )
+      lazy val num = numbx.findPrefixOf(s).map({ text =>
+        val n = BigDecimal(text)
+        (text, NumToken(n, n, n))
+      })
 
-      val token = if ( isNum ) num else txt
-      val packed = if ( isNum ) NumToken(BigInt(num), BigInt(num), BigInt(num)) else WordToken(txt)
+      lazy val txt = wordx.findPrefixOf(s).map({ text =>
+        (text, WordToken(text))
+      })
 
-      tokenize( opts, s.substring( token.length ), acc :+ packed )
+      val Some((text, token)) = num.orElse(txt)
+      tokenize(s.substring(text.length), acc :+ token)
     }
   }
 
-  sealed trait Opts
-  case object JustMaximums extends Opts
-  case object JustMinimums extends Opts
-  case object MinAndMax extends Opts
-  case object FullStat extends Opts
+  sealed trait DisplayOpts
+  case object JustMaximums extends DisplayOpts
+  case object JustMinimums extends DisplayOpts
+  case object MinAndMax extends DisplayOpts
+  case object FullStat extends DisplayOpts
 
   val stdin = {
     val reader = new BufferedReader( new InputStreamReader( System.in ) )
     Iterator.continually(reader.readLine).takeWhile(_ != null)
   }
 
+  class Config(args: Seq[String]) extends ScallopConf(args) {
+    val mx = opt[Boolean]("max", short='x')
+    val mn = opt[Boolean]("min")
+    val full = opt[Boolean]("full")
+    val reset = opt[String]("reset", descr="Supply a regex that will reset counts if the line matches")
+    verify()
+
+    def displayOpts: DisplayOpts =
+      if (full.isSupplied) FullStat
+      else if (mx.isSupplied) JustMaximums
+      else if ( mn.isSupplied) JustMinimums
+      else MinAndMax
+  }
+
   def main(args: Array[String]): Unit = {
 
-    val opts = (args.contains("+mx"), args.contains("+mn"), args.contains("+full")) match {
-      case (true, _, _) => JustMaximums
-      case (_, true, _) => JustMinimums
-      case (_, _, true) => FullStat
-      case _ => MinAndMax
-    }
+    val conf = new Config(args)
+    val opts = conf.displayOpts
 
-    stdin
-      .map(tokenize(opts, _, Seq.empty))
-      .map(Line.apply)
-      .foreach({ newLine =>
+    val resetRx = conf.reset.toOption.map(_.r)
 
-        // Key is just a list of words, no numbers included
-        val key = newLine.key
+    stdin.foreach({ rawLine =>
 
-        val mergedLine = seen.get(key) match {
-
-          // We've already seen a line that looks similar to this.
-          // Merge new data into the existing data
-          case Some(line) => line.merge(newLine)
-
-          // This list of tokens represents a new, never-before-seen
-          // line, so just copy it over as-is
-          case None => newLine
-        }
-
-        println(mergedLine.repr(opts))
-
-        seen = seen + (key -> mergedLine)
+      resetRx.flatMap(_.findFirstIn(rawLine)).foreach({ _ =>
+        // We've been provided a reset regexp, and it matches
+        // the current raw line. Reset our statistics db!
+        seen = Map()
       })
+
+      val newLine = Line(tokenize(rawLine, Seq.empty))
+
+      // Key is just a list of words, no numbers included
+      val key = newLine.key
+
+      val mergedLine = seen.get(key) match {
+
+        // We've already seen a line that looks similar to this.
+        // Merge new data into the existing data
+        case Some(line) => line.merge(newLine)
+
+        // This list of tokens represents a new, never-before-seen
+        // line, so just copy it over as-is
+        case None => newLine
+      }
+
+      println(mergedLine.repr(opts))
+
+      seen = seen + (key -> mergedLine)
+    })
   }
 }

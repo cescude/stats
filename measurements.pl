@@ -17,8 +17,13 @@ sub m2 {
   printf("Status count: %d of %s\n", rr(9999), $words[rr(scalar @words)]);
 }
 
+sub decimal {
+  printf(" %%time %f + %f\n", rand(200), rand());
+}
+
 while (1) {
   m0;
   m1;
   m2;
+  decimal;
 }

@@ -21,6 +21,12 @@ sub decimal {
   printf(" %%time %f + %f\n", rand(200), rand());
 }
 
+my $inc = 0;
+sub inc {
+  printf("Counter #$inc\n");
+  $inc++;
+}
+
 my $tr=0;
 sub newHeader {
   if ( rand() < 0.1 ) {
@@ -34,4 +40,5 @@ while (1) {
   m1;
   m2;
   decimal;
+  inc;
 }

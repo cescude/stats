@@ -11,13 +11,10 @@ object Main {
   case object Verbose extends DisplayOpts
 
   class Config(args: Seq[String]) extends ScallopConf(args) {
-    val avg = opt[Boolean]("avg", short='a', descr="Display averages instead of a min/max range")
-    val verbose = opt[Boolean]("verbose", short='v')
+    val avg = opt[Boolean]("avg", short='a', descr="Include average value in range")
+    val count = opt[Boolean]("count", short='c', descr="Include sample count")
     val reset = opt[String]("reset", descr="Supply a regex that will reset counts if the line matches")
     verify()
-
-    def displayOpts: DisplayOpts = if (verbose.isSupplied) Verbose else Default
-    def variant: Variant = if (avg.isSupplied) AvgVariant else RangeVariant
   }
 
   case class Key( tokens: Seq[String] )
@@ -37,12 +34,12 @@ object Main {
       }))
     }
 
-    def repr(opts: DisplayOpts): String = tokens.map(_.repr(opts)).mkString("")
+    def repr(conf: Config): String = tokens.map(_.repr(conf)).mkString("")
   }
 
   sealed trait Token {
     def merge( t: Token ): Token   // combines "this" with the token "t"
-    def repr( opts: DisplayOpts ): String // convert this token to a printable value
+    def repr( conf: Config ): String // convert this token to a printable value
   }
   case class WordToken( w: String ) extends Token {
     override def merge(t: Token): Token = t match {
@@ -50,72 +47,56 @@ object Main {
       case _ => ???
     }
 
-    override def repr(opts: DisplayOpts): String = w
+    override def repr(conf: Config): String = w
   }
 
   def color(s: BigDecimal): fansi.Str = color(fansi.Str(s.toString))
   def color(s: fansi.Str): fansi.Str = fansi.Color.Blue(s)
 
-  // What type of numbers should we be tracking?
-  sealed trait Variant
-  case object AvgVariant extends Variant
-  case object RangeVariant extends Variant
-
-  def mkNumToken(variant: Variant, n: BigDecimal): Token = variant match {
-    case AvgVariant => AvgToken(n, 1)
-    case RangeVariant => RangeToken(n, n, n)
+  object NumToken {
+    def apply(n: BigDecimal): NumToken = NumToken(n, n, n, n, 1)
   }
 
-  case class RangeToken(mn: BigDecimal, mx: BigDecimal, current: BigDecimal) extends Token {
-    override def merge(t: Token): Token = t match {
-      case RangeToken(mn0, _, c0) if mn0 < mn => RangeToken(mn0, mx, c0)
-      case RangeToken(_, mx0, c0) if mx0 > mx => RangeToken(mn, mx0, c0)
-      case RangeToken(_, _, c0) => RangeToken(mn, mx, c0)
-      case _ => ???
+  case class NumToken(mn: BigDecimal,
+                      mx: BigDecimal,
+                      current: BigDecimal,
+                      sum: BigDecimal,
+                      count: BigDecimal) extends Token {
+    override def merge(t: Token): Token = {
+
+      // Just die if we've not been given a NumToken
+      val NumToken(mn0, mx0, current0, sum0, count0) = t
+
+      NumToken(
+        if (mn0 < mn) mn0 else mn,
+        if (mx0 > mx) mx0 else mx,
+        current0,
+        sum + sum0,
+        count + count0)
     }
 
-    override def repr(opts: DisplayOpts): String = opts match {
-      case Default if mn == mx => color(mn).render
-      case Default if mn == current => "[" + color(mn) + "…" + mx + "]"
-      case Default if mx == current => "[" + mn + "…" + color(mx) + "]"
-      case Default => "[" + mn + "…" + mx + "]"
+    override def repr(conf: Config): String = {
 
-      case Verbose if mn == mx => color(mn).render
-      case Verbose if mn == current => "[" + color(mn) + "…" + mx + "]"
-      case Verbose if mx == current => "[" + mn + "…" + color(mx) + "]"
-      case Verbose => "[" + mn + "…" + color(current) + "…" + mx + "]"
-    }
-  }
+      // Round the average to at most one more decimal place than what's
+      // available for the sum...
 
-  case class AvgToken(sum: BigDecimal, count: BigDecimal) extends Token {
-    override def merge(t: Token): Token = t match {
-      case AvgToken(sum0, count0) =>
-        /*
-        Combining averages; just need to track sum & count:
-        avg(ns..) = sum(ns)/len(ns)
-        avg(ms..) = sum(ms)/len(ms)
-        avg(ns.. ++ ms..) =
-            sum(ns)+sum(ms) / len(ns)+len(ms)
-         */
-        AvgToken(sum + sum0, count + count0)
-      case _ => ???
-    }
-
-    override def repr(opts: DisplayOpts): String = {
-      val avg = (sum / count).setScale(
+      lazy val avg = (sum / count).setScale(
         sum.scale + 1,
         BigDecimal.RoundingMode.HALF_UP)
 
-      opts match {
-        case Verbose => s"[${color(avg)}, #$count]"
-        case Default => s"[${color(avg)}]"
-      }
+      Seq(
+        Some(color(s"$current")),
+        if (mn != mx) Some(s"$mn…$mx") else None,
+        if (conf.avg.isSupplied && count>1) Some(s"μ=$avg") else None,
+        if (conf.count.isSupplied) Some(s"#=$count") else None)
+        .flatten
+        .mkString("[", ",", "]")
     }
   }
 
   // Be slow? Who cares, it's fast enough
   @scala.annotation.tailrec
-  def tokenize(v: Variant, s: String, acc: Seq[Token]): Seq[Token] = {
+  def tokenize(s: String, acc: Seq[Token]): Seq[Token] = {
     if ( s.isEmpty ) acc
     else {
       val numbx = raw"[0-9]+\.[0-9]+|[0-9]+".r
@@ -123,7 +104,7 @@ object Main {
 
       lazy val num = numbx.findPrefixOf(s).map({ text =>
         val n = BigDecimal(text)
-        (text, mkNumToken(v, n))
+        (text, NumToken(n))
       })
 
       lazy val txt = wordx.findPrefixOf(s).map({ text =>
@@ -131,7 +112,7 @@ object Main {
       })
 
       val Some((text, token)) = num.orElse(txt)
-      tokenize(v, s.substring(text.length), acc :+ token)
+      tokenize(s.substring(text.length), acc :+ token)
     }
   }
 
@@ -145,9 +126,6 @@ object Main {
   def main(args: Array[String]): Unit = {
 
     val conf = new Config(args)
-    val opts = conf.displayOpts
-    val variant = conf.variant
-
     val resetRx = conf.reset.toOption.map(_.r)
 
     stdin.foreach({ rawLine =>
@@ -158,7 +136,7 @@ object Main {
         seen = Map()
       })
 
-      val newLine = Line(tokenize(variant, rawLine, Seq.empty))
+      val newLine = Line(tokenize(rawLine, Seq.empty))
 
       // Key is just a list of words, no numbers included
       val key = newLine.key
@@ -174,7 +152,7 @@ object Main {
         case None => newLine
       }
 
-      println(mergedLine.repr(opts))
+      println(mergedLine.repr(conf))
 
       seen = seen + (key -> mergedLine)
     })

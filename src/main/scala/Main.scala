@@ -6,10 +6,6 @@ import scala.util.matching.Regex
 
 object Main {
 
-  sealed trait DisplayOpts
-  case object Default extends DisplayOpts
-  case object Verbose extends DisplayOpts
-
   class Config(args: Seq[String]) extends ScallopConf(args) {
     val avg = opt[Boolean]("avg", short='a', descr="Include average value in range")
     val count = opt[Boolean]("count", short='c', descr="Include sample count")
@@ -53,7 +49,7 @@ object Main {
   }
 
   def color(s: BigDecimal): fansi.Str = color(fansi.Str(s.toString))
-  def color(s: fansi.Str): fansi.Str = fansi.Reversed.On(s) //fansi.Color.Blue(s)
+  def color(s: fansi.Str): fansi.Str = fansi.Color.Blue(s) //fansi.Color.Blue(s)
 
   object NumToken {
     def apply(n: BigDecimal): NumToken = NumToken(n, n, n, n, 1)
@@ -89,9 +85,9 @@ object Main {
         sum.scale + 1,
         BigDecimal.RoundingMode.HALF_UP)
 
-      Seq( true -> s"$current",
-           (mn != mx) -> s"$mn…$mx",
-           (conf.avg.isSupplied && count>1) -> s"μ=$avg",
+      Seq( (mn == mx) -> s"$current",
+           (mn != mx) -> s"$mn…$current…$mx",
+           (conf.avg.isSupplied && mn != mx) -> s"μ=$avg",
            (conf.count.isSupplied && count>1) -> s"#=$count")
         .filter( _._1 )
         .map( _._2 )

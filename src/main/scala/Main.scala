@@ -14,6 +14,7 @@ object Main {
     val avg = opt[Boolean]("avg", short='a', descr="Include average value in range")
     val count = opt[Boolean]("count", short='c', descr="Include sample count")
     val reset = opt[String]("reset", descr="Supply a regex that will reset counts if the line matches")
+    val highlight = opt[Boolean]("highlight")
     verify()
   }
 
@@ -41,6 +42,7 @@ object Main {
     def merge( t: Token ): Token   // combines "this" with the token "t"
     def repr( conf: Config ): String // convert this token to a printable value
   }
+
   case class WordToken( w: String ) extends Token {
     override def merge(t: Token): Token = t match {
       case WordToken(_) => t
@@ -75,6 +77,9 @@ object Main {
         count + count0)
     }
 
+    def someif[T](predicate: Boolean, iftrue: => T): Option[T] =
+      if ( predicate ) Some(iftrue) else None
+
     override def repr(conf: Config): String = {
 
       // Round the average to at most one more decimal place than what's
@@ -84,12 +89,13 @@ object Main {
         sum.scale + 1,
         BigDecimal.RoundingMode.HALF_UP)
 
-      Seq(
-        Some(color(s"$current")),
-        if (mn != mx) Some(s"$mn…$mx") else None,
-        if (conf.avg.isSupplied && count>1) Some(s"μ=$avg") else None,
-        if (conf.count.isSupplied && count>1) Some(s"#=$count") else None)
-        .flatten
+      Seq( true -> s"$current",
+           (mn != mx) -> s"$mn…$mx",
+           (conf.avg.isSupplied && count>1) -> s"μ=$avg",
+           (conf.count.isSupplied && count>1) -> s"#=$count")
+        .filter( _._1 )
+        .map( _._2 )
+        .map( s => if (conf.highlight.isSupplied) color(s) else s )
         .mkString("[", ",", "]")
     }
   }

@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 
+srand(0);
+
 sub rr {
   my ($max) = @_;
   int(rand($max))

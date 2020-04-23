@@ -51,7 +51,7 @@ object Main {
   }
 
   def color(s: BigDecimal): fansi.Str = color(fansi.Str(s.toString))
-  def color(s: fansi.Str): fansi.Str = fansi.Color.Blue(s)
+  def color(s: fansi.Str): fansi.Str = fansi.Reversed.On(s) //fansi.Color.Blue(s)
 
   object NumToken {
     def apply(n: BigDecimal): NumToken = NumToken(n, n, n, n, 1)
@@ -88,7 +88,7 @@ object Main {
         Some(color(s"$current")),
         if (mn != mx) Some(s"$mn…$mx") else None,
         if (conf.avg.isSupplied && count>1) Some(s"μ=$avg") else None,
-        if (conf.count.isSupplied) Some(s"#=$count") else None)
+        if (conf.count.isSupplied && count>1) Some(s"#=$count") else None)
         .flatten
         .mkString("[", ",", "]")
     }

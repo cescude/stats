@@ -11,10 +11,14 @@ object Main {
     val count = opt[Boolean]("count", short='c', descr="Include sample count")
     val reset = opt[String]("reset", descr="Supply a regex that will reset counts if the line matches")
     val highlight = opt[Boolean]("highlight")
+    val leaderboard = opt[Boolean]("leaderboard", short='l', "Show leaderboard instead of line-by-line output")
     verify()
   }
 
-  case class Key( tokens: Seq[String] )
+  case class Key( tokens: Seq[String] ) extends Ordered[Key] {
+    val sortKey = tokens.mkString(" ")
+    override def compare(that: Key): Int = sortKey compareTo that.sortKey
+  }
   case class Line( tokens: Seq[Token] ) {
     // Each line has a particular identifying key
     // (e.g., the text with numbers removed)
@@ -123,9 +127,11 @@ object Main {
     Iterator.continually(reader.readLine).takeWhile(_ != null)
   }
 
-  var seen: Map[Key,Line] = Map()
-
   def main(args: Array[String]): Unit = {
+
+    var seen: Map[Key,Line] = Map()
+    var leaderboard: Seq[Key] = Seq()
+    var lastWrite: Long = System.currentTimeMillis()
 
     val conf = new Config(args)
     val resetRx = conf.reset.toOption.map(_.r)
@@ -154,9 +160,49 @@ object Main {
         case None => newLine
       }
 
-      println(mergedLine.repr(conf))
-
       seen = seen + (key -> mergedLine)
+
+      if (conf.leaderboard.isSupplied) {
+
+        leaderboard = key +: leaderboard
+          .filter(_ != key)
+          .take(10)
+
+        val now = System.currentTimeMillis()
+
+        if (now - lastWrite > 100) {
+          printLeaderboard(conf, leaderboard, seen)
+          lastWrite = now
+        }
+      }
+      else {
+        println(mergedLine.repr(conf))
+      }
     })
+
+    if (conf.leaderboard.isSupplied) {
+      printLeaderboard(conf, leaderboard, seen)
+
+      // Move the cursor down past the leaderboard
+      print(s"\u001b[${leaderboard.size}B")
+      System.out.flush()
+    }
+  }
+
+  def printLeaderboard(conf: Config, leaderboard: Seq[Key], seen: Map[Key, Line]) = {
+
+    // Print the entries associated with the keys in our leaderboard
+    leaderboard.sorted
+      .flatMap(seen.get)
+      .map(_.repr(conf))
+      .foreach { line =>
+        // Print the line, and clear any junk after it
+        println(s"${line}\u001b[0K")
+      }
+
+    // Move all the way to the left and return to start
+    if (leaderboard.nonEmpty) {
+      print(s"\r\u001b[${leaderboard.size}A")
+    }
   }
 }

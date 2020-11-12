@@ -174,7 +174,7 @@ object Main {
         val now = System.currentTimeMillis()
 
         if (now - lastWrite > 100) {
-          printLeaderboard(conf, leaderboard, seen)
+          printLeaderboard(conf, leaderboard, seen, true)
           lastWrite = now
         }
       }
@@ -184,15 +184,13 @@ object Main {
     })
 
     if (conf.leaderboard.isSupplied) {
-      printLeaderboard(conf, leaderboard, seen)
 
-      // Move the cursor down past the leaderboard
-      print(s"\u001b[${leaderboard.size}B")
-      System.out.flush()
+      // Print all seen patterns, not just the most recent 10
+      printLeaderboard(conf, seen.keys.toSeq, seen, false)
     }
   }
 
-  def printLeaderboard(conf: Config, leaderboard: Seq[Key], seen: Map[Key, Line]) = {
+  def printLeaderboard(conf: Config, leaderboard: Seq[Key], seen: Map[Key, Line], reset: Boolean) = {
 
     // Print the entries associated with the keys in our leaderboard
     leaderboard.sorted
@@ -203,9 +201,11 @@ object Main {
         println(s"${line}\u001b[0K")
       }
 
-    // Move all the way to the left and return to start
-    if (leaderboard.nonEmpty) {
-      print(s"\r\u001b[${leaderboard.size}A")
+    if ( reset ) {
+      // Move all the way to the left and return to start
+      if (leaderboard.nonEmpty) {
+        print(s"\r\u001b[${leaderboard.size}A")
+      }
     }
   }
 }

@@ -19,7 +19,7 @@ object Main {
     val sortKey = tokens.mkString(" ")
     override def compare(that: Key): Int = sortKey compareTo that.sortKey
   }
-  case class Line( tokens: Seq[Token] ) {
+  case class Line( tokens: Seq[Token], count: BigInt = 1 ) {
     // Each line has a particular identifying key
     // (e.g., the text with numbers removed)
     def key: Key = Key(tokens.collect({
@@ -29,13 +29,20 @@ object Main {
     // Takes the values from `rline` and merges them
     // into the current line.
     def merge(rline: Line): Line = {
-      Line(tokens.zip(rline.tokens).map({
-        case (ltoken, rtoken) =>
-          ltoken.merge(rtoken)
-      }))
+      Line(
+        tokens.zip(rline.tokens).map({
+          case (ltoken, rtoken) =>
+            ltoken.merge(rtoken)
+        }),
+        count + rline.count
+      )
     }
 
-    def repr(conf: Config): String = tokens.map(_.repr(conf)).mkString("")
+    def repr(conf: Config): String = {
+      val prefix = if (conf.count.isSupplied) s"#=$count" else ""
+      val tokenRepr = tokens.map(_.repr(conf)).mkString("")
+      s"$prefix $tokenRepr"
+    }
   }
 
   sealed trait Token {
@@ -77,9 +84,6 @@ object Main {
         count + count0)
     }
 
-    def someif[T](predicate: Boolean, iftrue: => T): Option[T] =
-      if ( predicate ) Some(iftrue) else None
-
     override def repr(conf: Config): String = {
 
       // Round the average to at most one more decimal place than what's
@@ -91,8 +95,7 @@ object Main {
 
       Seq( (mn == mx) -> s"$current",
            (mn != mx) -> s"$mn…$current…$mx",
-           (conf.avg.isSupplied && mn != mx) -> s"μ=$avg",
-           (conf.count.isSupplied && count>1) -> s"#=$count")
+           (conf.avg.isSupplied && mn != mx) -> s"μ=$avg")
         .filter( _._1 )
         .map( _._2 )
         .map( s => if (conf.highlight.isSupplied) color(s) else s )
@@ -100,14 +103,14 @@ object Main {
     }
   }
 
+  val numbx = raw"[0-9]+\.[0-9]+|[0-9]+".r
+  val wordx = raw"[^0-9]+".r
+
   // Be slow? Who cares, it's fast enough
   @scala.annotation.tailrec
   def tokenize(s: String, acc: Seq[Token]): Seq[Token] = {
     if ( s.isEmpty ) acc
     else {
-      val numbx = raw"[0-9]+\.[0-9]+|[0-9]+".r
-      val wordx = raw"[^0-9]+".r
-
       lazy val num = numbx.findPrefixOf(s).map({ text =>
         val n = BigDecimal(text)
         (text, NumToken(n))

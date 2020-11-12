@@ -15,15 +15,15 @@ object Main {
     verify()
   }
 
-  case class Key( tokens: Seq[String] ) extends Ordered[Key] {
-    val sortKey = tokens.mkString(" ")
-    override def compare(that: Key): Int = sortKey compareTo that.sortKey
-  }
-  case class Line( tokens: Seq[Token], count: BigInt = 1 ) {
+  case class Key( tokens: Seq[String] )
+  case class Line( tokens: Seq[Token], count: BigInt = 1 ) extends Ordered[Line] {
     // Each line has a particular identifying key
     // (e.g., the text with numbers removed)
     def key: Key = Key(tokens.collect({
       case WordToken(w) => w.trim
+      // Provide a blank space where NumToken would be, to allow us to
+      // differentiate between "123ab" and "ab"
+      case _ => ""
     }))
 
     // Takes the values from `rline` and merges them
@@ -43,6 +43,8 @@ object Main {
       val tokenRepr = tokens.map(_.repr(conf)).mkString("")
       s"$prefix $tokenRepr"
     }
+
+    override def compare(line0: Line): Int = count.compare(line0.count)
   }
 
   sealed trait Token {
@@ -190,18 +192,20 @@ object Main {
     }
   }
 
-  def printLeaderboard(conf: Config, leaderboard: Seq[Key], seen: Map[Key, Line], reset: Boolean) = {
+  def printLeaderboard(conf: Config, leaderboard: Seq[Key], seen: Map[Key, Line], rewindCursor: Boolean) = {
 
     // Print the entries associated with the keys in our leaderboard
-    leaderboard.sorted
+    leaderboard
       .flatMap(seen.get)
+      .sorted
+      .reverse
       .map(_.repr(conf))
       .foreach { line =>
         // Print the line, and clear any junk after it
         println(s"${line}\u001b[0K")
       }
 
-    if ( reset ) {
+    if ( rewindCursor ) {
       // Move all the way to the left and return to start
       if (leaderboard.nonEmpty) {
         print(s"\r\u001b[${leaderboard.size}A")
